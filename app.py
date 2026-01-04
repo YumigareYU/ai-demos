@@ -9,23 +9,39 @@ import time
 st.set_page_config(page_title="AI 影像辨識實驗室", page_icon="🤖")
 
 st.title("🐱 貓咪滾球追蹤 (AI 辨識)")
-st.write("上傳影片後，系統會自動進行追蹤處理，並產生流暢的結果影片。")
+st.write("上傳影片後，系統會自動進行追蹤處理。")
 
-# --- 1. 上傳影片 ---
-uploaded_file = st.file_uploader(
-    "請選擇影片檔案...", type=['mp4', 'mov', 'avi', 'webm'])
+# --- 側邊欄或主畫面選項 ---
+st.write("---")
+use_demo = st.checkbox("👉 沒有影片嗎？點我直接使用「範例影片」試玩", value=False)
 
-# --- 2. 開始處理 ---
-if uploaded_file is not None:
-    # 建立暫存檔
-    tfile = tempfile.NamedTemporaryFile(delete=False)
-    tfile.write(uploaded_file.read())
+input_path = None
+temp_file_to_clean = None  # 用來記錄是否需要刪除暫存檔
 
-    # 【關鍵修正】：寫入資料後，必須馬上關閉檔案，Windows 才允許後續操作
-    tfile.close()
+# --- 邏輯判斷：決定影片來源 ---
+if use_demo:
+    # 來源 A: 使用範例影片
+    if os.path.exists("demo.mp4"):
+        input_path = "demo.mp4"
+        st.info("正在使用範例影片進行演示...")
+    else:
+        st.error("❌ 找不到 demo.mp4 檔案，請確認是否已上傳到 GitHub。")
+else:
+    # 來源 B: 使用者上傳
+    uploaded_file = st.file_uploader(
+        "或是選擇您自己的影片...", type=['mp4', 'mov', 'avi', 'webm'])
+    if uploaded_file is not None:
+        tfile = tempfile.NamedTemporaryFile(delete=False)
+        tfile.write(uploaded_file.read())
+        tfile.close()  # 關閉檔案以免 Windows 鎖定
 
+        input_path = tfile.name
+        temp_file_to_clean = tfile.name  # 標記這個檔案最後要刪除
+
+# --- 3. 開始處理 (如果有取得路徑) ---
+if input_path is not None:
     try:
-        cap = cv2.VideoCapture(tfile.name)
+        cap = cv2.VideoCapture(input_path)
 
         # 取得影片資訊
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -34,9 +50,9 @@ if uploaded_file is not None:
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         # 設定輸出檔案
-        output_path = tfile.name + "_output.webm"
+        output_filename = "output_result.webm"
         fourcc = cv2.VideoWriter_fourcc(*'VP90')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        out = cv2.VideoWriter(output_filename, fourcc, fps, (width, height))
 
         # --- 介面元件 ---
         st.write("🔄 AI 正在逐格分析影片中，請稍候...")
@@ -100,12 +116,10 @@ if uploaded_file is not None:
         st.success("✅ 處理完成！")
 
         # 播放影片
-        st.video(output_path)
+        st.video(output_filename)
 
     finally:
-        # 使用 try...finally 確保就算中間報錯，最後也會清理垃圾檔案
-        # 稍微等待一下確保資源釋放
+        # 清理邏輯：只刪除上傳產生的暫存檔，不要刪除範例影片 demo.mp4
         time.sleep(1)
-        if os.path.exists(tfile.name):
-            os.remove(tfile.name)
-        # output_path 暫時不刪除，因為 Streamlit 還要播放它
+        if temp_file_to_clean and os.path.exists(temp_file_to_clean):
+            os.remove(temp_file_to_clean)
