@@ -8,49 +8,54 @@ import os
 st.set_page_config(page_title="AI 影像辨識實驗室", page_icon="🤖")
 
 st.title("🐱 貓咪滾球追蹤 (AI 辨識)")
-st.write("這是使用 **OpenCV** 與 **Streamlit** 建構的即時影像分析。請上傳貓咪玩粉紅球的影片。")
+st.write("上傳影片後，系統會自動進行追蹤處理，並產生流暢的結果影片。")
 
 # --- 1. 上傳影片 ---
 uploaded_file = st.file_uploader("請選擇影片檔案...", type=['mp4', 'mov', 'avi', 'webm'])
 
 # --- 2. 開始處理 ---
 if uploaded_file is not None:
-    # 建立一個暫存檔來儲存上傳的影片 (因為 OpenCV 需要讀取實體檔案)
+    # 建立暫存檔讀取上傳的影片
     tfile = tempfile.NamedTemporaryFile(delete=False) 
     tfile.write(uploaded_file.read())
     
-    # 開啟影片
     cap = cv2.VideoCapture(tfile.name)
     
-    # 建立一個空位，用來不斷更新畫面
-    st_frame = st.empty()
+    # 取得影片資訊 (為了製作進度條和設定輸出格式)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
-    # 建立一個停止按鈕
-    stop_button = st.button("停止播放")
+    # 設定輸出檔案 (使用 WebM + VP90 編碼，確保瀏覽器能播)
+    output_path = tfile.name + "_output.webm"
+    fourcc = cv2.VideoWriter_fourcc(*'VP90')
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
     
-    while cap.isOpened() and not stop_button:
+    # --- 介面元件 ---
+    st.write("🔄 AI 正在逐格分析影片中，請稍候...")
+    my_bar = st.progress(0) # 建立進度條
+    status_text = st.empty() # 顯示目前幀數
+    
+    frame_count = 0
+    
+    while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
         
-        # --- 您的 OpenCV 辨識邏輯 (原封不動搬過來) ---
-        # 1. 模糊化
+        # --- 您的 OpenCV 辨識邏輯 (維持不變) ---
         blurred = cv2.GaussianBlur(frame, (11, 11), 0)
-        
-        # 2. 轉換顏色空間 BGR -> HSV
         hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
 
-        # 3. 定義粉紅色範圍
         lower_pink = np.array([130, 50, 50])
         upper_pink = np.array([175, 255, 255])
         mask = cv2.inRange(hsv, lower_pink, upper_pink)
 
-        # 4. 消除雜訊
         kernel = np.ones((5, 5), np.uint8)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
         mask = cv2.erode(mask, None, iterations=1)
 
-        # 5. 尋找輪廓
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         for c in contours:
@@ -62,19 +67,31 @@ if uploaded_file is not None:
 
             if circularity > 0.6:
                 ((x, y), radius) = cv2.minEnclosingCircle(c)
-                # 畫圓圈
                 cv2.circle(frame, (int(x), int(y)), int(radius), (0, 255, 0), 2)
-                # 寫文字
                 cv2.putText(frame, f"Ball: {circularity:.2f}", (int(x), int(y)-20),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         # ---------------------------------------------
         
-        # --- 關鍵：將 BGR 轉回 RGB 才能在網頁正常顯示 ---
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # 寫入處理後的影片檔
+        out.write(frame)
         
-        # 更新畫面
-        st_frame.image(frame, channels="RGB", use_container_width=True)
+        # 更新進度條
+        frame_count += 1
+        if total_frames > 0:
+            my_bar.progress(min(frame_count / total_frames, 1.0))
+        status_text.text(f"Processing frame: {frame_count} / {total_frames}")
 
     cap.release()
-    # 刪除暫存檔
+    out.release()
+    
+    # --- 處理完成，顯示結果 ---
+    my_bar.empty()     # 隱藏進度條
+    status_text.empty() # 隱藏文字
+    st.success("✅ 處理完成！")
+    
+    # 播放影片
+    st.video(output_path)
+    
+    # 清理暫存檔
     os.remove(tfile.name)
+    # os.remove(output_path) # 這裡先不刪除，以免影片還沒看完就被刪掉
